@@ -9,11 +9,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const APP_NAME = "MS BOT";
 const BOT_TOKEN = process.env.BOT_TOKEN || "9024683860:AAGwu0-b8TTrq2gMC4ZCaZoDsRXBN1ibRZs";
-const ADMIN_ID = "7476086614";
+const ADMIN_ID = "7476086614"; // Aapki fix Admin ID
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 const FIREBASE_URL = "https://reactions-maker-site-default-rtdb.firebaseio.com/ms-bot";
 
-// Health check route
 app.get("/health", (req, res) => {
   res.json({ ok: true, app: APP_NAME });
 });
@@ -169,13 +168,21 @@ app.post("/api/telegram-webhook", async (req, res) => {
       const chatId = String(message.chat.id);
       const text = message.text ? message.text.trim() : "";
 
-      if (chatId === String(ADMIN_ID)) {
-        if (text.startsWith("/start") || text.startsWith("/help")) {
+      // Debugging ke liye: Har user ko uska ID bata dega
+      if (text.startsWith("/start") || text.startsWith("/help")) {
+        if (chatId === String(ADMIN_ID)) {
           await tgCall("sendMessage", {
             chat_id: chatId,
-            text: `${APP_NAME} ADMIN PANEL\n\n/users - List all users\n/stats - Show platform stats`
+            text: `${APP_NAME} ADMIN PANEL\n\nAapka ID match ho gaya hai!\n\n/users - List all users\n/stats - Show platform stats`
           });
-        } else if (text.startsWith("/users")) {
+        } else {
+          await tgCall("sendMessage", {
+            chat_id: chatId,
+            text: `Aapka Telegram Chat ID yeh hai: ${chatId}\nLekin aap Admin nahi hain.`
+          });
+        }
+      } else if (chatId === String(ADMIN_ID)) {
+        if (text.startsWith("/users")) {
           const dbData = await fetchFirebase() || {};
           const users = dbData.users || {};
           const userList = Object.values(users)
@@ -190,11 +197,6 @@ app.post("/api/telegram-webhook", async (req, res) => {
           const approved = Object.values(users).filter(u => u.status === 'approved').length;
           await tgCall("sendMessage", { chat_id: chatId, text: `STATS:\nTotal: ${total}\nPending: ${pending}\nApproved: ${approved}` });
         }
-      } else {
-        await tgCall("sendMessage", {
-          chat_id: chatId,
-          text: "Access Denied: You are not the admin of this bot."
-        });
       }
     }
 
@@ -212,7 +214,7 @@ app.post("/api/telegram-webhook", async (req, res) => {
         let users = dbData.users || {};
         if (users[deviceId]) {
           users[deviceId].status = 'approved';
-          users[deviceId],expires_at = expiry;
+          users[deviceId].expires_at = expiry; // <-- Fix here (dot instead of comma)
           await saveFirebase("users", users);
 
           await tgCall("answerCallbackQuery", { callback_query_id: callbackQuery.id, text: "User approved!" });
