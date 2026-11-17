@@ -1,7 +1,7 @@
 {
-  "name": "ms-node",
+  "name": "ms-bot",
   "version": "1.0.0",
-  "description": "ms signals platform in Node.js",
+  "description": "MS BOT platform with dynamic admin and telegram integration",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
