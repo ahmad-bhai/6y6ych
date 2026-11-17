@@ -9,11 +9,15 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const APP_NAME = "MS BOT";
 const BOT_TOKEN = process.env.BOT_TOKEN || "9024683860:AAGwu0-b8TTrq2gMC4ZCaZoDsRXBN1ibRZs";
-const ADMIN_ID = "7476086614"; // Aapki fix Admin ID
+const ADMIN_ID = "7476086614";
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 const FIREBASE_URL = "https://reactions-maker-site-default-rtdb.firebaseio.com/ms-bot";
 
-// Helper: Firebase se data lana
+// Health check route
+app.get("/health", (req, res) => {
+  res.json({ ok: true, app: APP_NAME });
+});
+
 async function fetchFirebase(endpoint = "") {
   try {
     const fetch = (await import('node-fetch')).default;
@@ -26,7 +30,6 @@ async function fetchFirebase(endpoint = "") {
   }
 }
 
-// Helper: Firebase par data save/update karna
 async function saveFirebase(endpoint, data) {
   try {
     const fetch = (await import('node-fetch')).default;
@@ -90,7 +93,6 @@ async function notifyNewUser(deviceId) {
   );
 }
 
-// Routes
 app.post("/api/register", async (req, res) => {
   const { deviceId } = req.body || {};
   if (!validDeviceId(deviceId)) {
@@ -155,7 +157,6 @@ app.post("/api/status", async (req, res) => {
   res.json(response);
 });
 
-// Telegram Webhook Endpoint
 app.post("/api/telegram-webhook", async (req, res) => {
   try {
     const update = req.body;
@@ -187,7 +188,7 @@ app.post("/api/telegram-webhook", async (req, res) => {
           const total = Object.keys(users).length;
           const pending = Object.values(users).filter(u => u.status === 'pending').length;
           const approved = Object.values(users).filter(u => u.status === 'approved').length;
-          await tgCall("sendMessage", { chat_id: chatId, text: `STATS:\nTotal: ${total}\nPending: {pending}\nApproved: ${approved}` });
+          await tgCall("sendMessage", { chat_id: chatId, text: `STATS:\nTotal: ${total}\nPending: ${pending}\nApproved: ${approved}` });
         }
       } else {
         await tgCall("sendMessage", {
@@ -211,7 +212,7 @@ app.post("/api/telegram-webhook", async (req, res) => {
         let users = dbData.users || {};
         if (users[deviceId]) {
           users[deviceId].status = 'approved';
-          users[deviceId].expires_at = expiry;
+          users[deviceId],expires_at = expiry;
           await saveFirebase("users", users);
 
           await tgCall("answerCallbackQuery", { callback_query_id: callbackQuery.id, text: "User approved!" });
