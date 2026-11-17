@@ -7,9 +7,9 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-const APP_NAME = "TRADER SANA";
-const BOT_TOKEN = process.env.BOT_TOKEN || "";
-const ADMIN_ID = process.env.ADMIN_ID || "";
+const APP_NAME = "ms";
+const BOT_TOKEN = process.env.BOT_TOKEN || "9024683860:AAGwu0-b8TTrq2gMC4ZCaZoDsRXBN1ibRZs";
+const ADMIN_ID = process.env.ADMIN_ID || "7476086614";
 const TELEGRAM_API = BOT_TOKEN ? `https://api.telegram.org/bot${BOT_TOKEN}` : "";
 
 // In-memory storage for demonstration / Vercel compatibility (Replace with DB like MongoDB/PostgreSQL for production)
