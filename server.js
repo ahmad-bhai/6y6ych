@@ -10,12 +10,35 @@ app.use(express.static(path.join(__dirname, 'public')));
 const APP_NAME = "MS BOT";
 const BOT_TOKEN = process.env.BOT_TOKEN || "9024683860:AAGwu0-b8TTrq2gMC4ZCaZoDsRXBN1ibRZs";
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
+const FIREBASE_URL = "https://reactions-maker-site-default-rtdb.firebaseio.com/ms-bot";
 
-// In-memory storage (For production, connect MongoDB/PostgreSQL)
-let users = {}; // device_id -> user object
-let signals = []; 
-let announcements = [];
-let dynamicAdminId = null; // Jo pehli baar /start karega woh admin ban jayega
+// Helper: Firebase se data lana
+async function fetchFirebase(endpoint = "") {
+  try {
+    const fetch = (await import('node-fetch')).default;
+    const res = await fetch(`${FIREBASE_URL}/${endpoint}.json`);
+    return await res.json();
+  } catch (err) {
+    console.error("Firebase read error:", err);
+    return null;
+  }
+}
+
+// Helper: Firebase par data save/update karna
+async function saveFirebase(endpoint, data) {
+  try {
+    const fetch = (await import('node-fetch')).default;
+    const res = await fetch(`${FIREBASE_URL}/${endpoint}.json`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return await res.json();
+  } catch (err) {
+    console.error("Firebase write error:", err);
+    return null;
+  }
+}
 
 function hashToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
@@ -42,8 +65,11 @@ async function tgCall(method, payload = {}) {
 }
 
 async function adminMessage(text, replyMarkup = null) {
-  if (!dynamicAdminId) return;
-  const payload = { chat_id: dynamicAdminId, text: text };
+  const dbData = await fetchFirebase();
+  const adminId = dbData ? dbData.adminId : null;
+  if (!adminId) return;
+
+  const payload = { chat_id: adminId, text: text };
   if (replyMarkup) payload.reply_markup = replyMarkup;
   await tgCall("sendMessage", payload);
 }
@@ -67,11 +93,14 @@ async function notifyNewUser(deviceId) {
 }
 
 // Routes
-app.post("/api/register", (req, res) => {
+app.post("/api/register", async (req, res) => {
   const { deviceId } = req.body || {};
   if (!validDeviceId(deviceId)) {
     return res.status(400).json({ error: "Invalid installation ID" });
   }
+
+  let dbData = await fetchFirebase() || {};
+  let users = dbData.users || {};
 
   let isNew = false;
   if (!users[deviceId]) {
@@ -84,21 +113,24 @@ app.post("/api/register", (req, res) => {
       updated_at: new Date().toISOString()
     };
     isNew = true;
+    await saveFirebase("users", users);
   }
 
   if (isNew) {
-    notifyNewUser(deviceId);
+    await notifyNewUser(deviceId);
   }
 
   res.json({ registered: true, status: users[deviceId].status });
 });
 
-app.post("/api/status", (req, res) => {
+app.post("/api/status", async (req, res) => {
   const { deviceId } = req.body || {};
   if (!validDeviceId(deviceId)) {
     return res.status(400).json({ error: "Invalid installation ID" });
   }
 
+  let dbData = await fetchFirebase() || {};
+  let users = dbData.users || {};
   let user = users[deviceId];
   let state = user ? user.status : "not_registered";
 
@@ -116,6 +148,8 @@ app.post("/api/status", (req, res) => {
       token = crypto.randomBytes(24).toString('hex');
       user.access_token_hash = hashToken(token);
       user.updated_at = new Date().toISOString();
+      users[deviceId] = user;
+      await saveFirebase("users", users);
     }
     response.accessToken = token;
   }
@@ -131,31 +165,36 @@ app.post("/api/telegram-webhook", async (req, res) => {
   const message = update.message;
   const callbackQuery = update.callback_query;
 
+  let dbData = await fetchFirebase() || {};
+
   if (message) {
     const chatId = message.chat.id;
     const text = message.text ? message.text.trim() : "";
 
     // Dynamic Admin Assignment: Pehla user jo message karega woh Admin ban jayega
-    if (!dynamicAdminId) {
-      dynamicAdminId = String(chatId);
+    if (!dbData.adminId) {
+      dbData.adminId = String(chatId);
+      await saveFirebase("adminId", dbData.adminId);
       await tgCall("sendMessage", {
         chat_id: chatId,
         text: `Aapko kamyabi ke sath ${APP_NAME} ka Admin bana diya gaya hai! 🎉`
       });
     }
 
-    if (String(chatId) === dynamicAdminId) {
+    if (String(chatId) === String(dbData.adminId)) {
       if (text.startsWith("/start") || text.startsWith("/help")) {
         await tgCall("sendMessage", {
           chat_id: chatId,
           text: `${APP_NAME} ADMIN COMMANDS\n\n/users - List all users\n/stats - Show platform stats`
         });
       } else if (text.startsWith("/users")) {
+        const users = dbData.users || {};
         const userList = Object.values(users)
           .map(u => `${u.device_id} | ${u.status} | ${u.expires_at || 'No expiry'}`)
           .join('\n');
         await tgCall("sendMessage", { chat_id: chatId, text: userList || "No users registered yet." });
       } else if (text.startsWith("/stats")) {
+        const users = dbData.users || {};
         const total = Object.keys(users).length;
         const pending = Object.values(users).filter(u => u.status === 'pending').length;
         const approved = Object.values(users).filter(u => u.status === 'approved').length;
@@ -169,14 +208,17 @@ app.post("/api/telegram-webhook", async (req, res) => {
     const chatId = callbackQuery.message.chat.id;
     const parts = data.split("|");
 
-    if (String(chatId) === dynamicAdminId && parts.length === 3 && parts[0] === "approve") {
+    if (String(chatId) === String(dbData.adminId) && parts.length === 3 && parts[0] === "approve") {
       const deviceId = parts[1];
       const days = parts[2] === "7d" ? 7 : 30;
       const expiry = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
       
+      let users = dbData.users || {};
       if (users[deviceId]) {
         users[deviceId].status = 'approved';
         users[deviceId].expires_at = expiry;
+        await saveFirebase("users", users);
+
         await tgCall("answerCallbackQuery", { callback_query_id: callbackQuery.id, text: "User approved!" });
         await tgCall("sendMessage", { chat_id: chatId, text: `User ${deviceId} approved for ${days} days.` });
       }
