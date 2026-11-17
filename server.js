@@ -18,6 +18,7 @@ async function fetchFirebase(endpoint = "") {
   try {
     const fetch = (await import('node-fetch')).default;
     const res = await fetch(`${FIREBASE_URL}/${endpoint}.json`);
+    if (!res.ok) return null;
     return await res.json();
   } catch (err) {
     console.error("Firebase read error:", err);
@@ -60,7 +61,7 @@ async function tgCall(method, payload = {}) {
     });
     return await r.json();
   } catch (err) {
-    console.error("Telegram API error:", err);
+    console.error("Telegram API call error:", err);
     return null;
   }
 }
@@ -156,66 +157,70 @@ app.post("/api/status", async (req, res) => {
 
 // Telegram Webhook Endpoint
 app.post("/api/telegram-webhook", async (req, res) => {
-  const update = req.body;
-  if (!update) return res.sendStatus(200);
+  try {
+    const update = req.body;
+    if (!update) return res.sendStatus(200);
 
-  const message = update.message;
-  const callbackQuery = update.callback_query;
+    const message = update.message;
+    const callbackQuery = update.callback_query;
 
-  let dbData = await fetchFirebase() || {};
+    if (message) {
+      const chatId = String(message.chat.id);
+      const text = message.text ? message.text.trim() : "";
 
-  if (message) {
-    const chatId = message.chat.id;
-    const text = message.text ? message.text.trim() : "";
-
-    // Sirf aapka ADMIN_ID commands execute kar sakega
-    if (String(chatId) === String(ADMIN_ID)) {
-      if (text.startsWith("/start") || text.startsWith("/help")) {
+      if (chatId === String(ADMIN_ID)) {
+        if (text.startsWith("/start") || text.startsWith("/help")) {
+          await tgCall("sendMessage", {
+            chat_id: chatId,
+            text: `${APP_NAME} ADMIN PANEL\n\n/users - List all users\n/stats - Show platform stats`
+          });
+        } else if (text.startsWith("/users")) {
+          const dbData = await fetchFirebase() || {};
+          const users = dbData.users || {};
+          const userList = Object.values(users)
+            .map(u => `${u.device_id} | ${u.status} | ${u.expires_at || 'No expiry'}`)
+            .join('\n');
+          await tgCall("sendMessage", { chat_id: chatId, text: userList || "No users registered yet." });
+        } else if (text.startsWith("/stats")) {
+          const dbData = await fetchFirebase() || {};
+          const users = dbData.users || {};
+          const total = Object.keys(users).length;
+          const pending = Object.values(users).filter(u => u.status === 'pending').length;
+          const approved = Object.values(users).filter(u => u.status === 'approved').length;
+          await tgCall("sendMessage", { chat_id: chatId, text: `STATS:\nTotal: ${total}\nPending: {pending}\nApproved: ${approved}` });
+        }
+      } else {
         await tgCall("sendMessage", {
           chat_id: chatId,
-          text: `${APP_NAME} ADMIN PANEL\n\n/users - List all users\n/stats - Show platform stats`
+          text: "Access Denied: You are not the admin of this bot."
         });
-      } else if (text.startsWith("/users")) {
-        const users = dbData.users || {};
-        const userList = Object.values(users)
-          .map(u => `${u.device_id} | ${u.status} | ${u.expires_at || 'No expiry'}`)
-          .join('\n');
-        await tgCall("sendMessage", { chat_id: chatId, text: userList || "No users registered yet." });
-      } else if (text.startsWith("/stats")) {
-        const users = dbData.users || {};
-        const total = Object.keys(users).length;
-        const pending = Object.values(users).filter(u => u.status === 'pending').length;
-        const approved = Object.values(users).filter(u => u.status === 'approved').length;
-        await tgCall("sendMessage", { chat_id: chatId, text: `STATS:\nTotal: ${total}\nPending: ${pending}\nApproved: ${approved}` });
-      }
-    } else {
-      await tgCall("sendMessage", {
-        chat_id: chatId,
-        text: "Access Denied: You are not the admin of this bot."
-      });
-    }
-  }
-
-  if (callbackQuery) {
-    const data = callbackQuery.data;
-    const chatId = callbackQuery.message.chat.id;
-    const parts = data.split("|");
-
-    if (String(chatId) === String(ADMIN_ID) && parts.length === 3 && parts[0] === "approve") {
-      const deviceId = parts[1];
-      const days = parts[2] === "7d" ? 7 : 30;
-      const expiry = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
-      
-      let users = dbData.users || {};
-      if (users[deviceId]) {
-        users[deviceId].status = 'approved';
-        users[deviceId].expires_at = expiry;
-        await saveFirebase("users", users);
-
-        await tgCall("answerCallbackQuery", { callback_query_id: callbackQuery.id, text: "User approved!" });
-        await tgCall("sendMessage", { chat_id: chatId, text: `User ${deviceId} approved for ${days} days.` });
       }
     }
+
+    if (callbackQuery) {
+      const data = callbackQuery.data;
+      const chatId = String(callbackQuery.message.chat.id);
+      const parts = data.split("|");
+
+      if (chatId === String(ADMIN_ID) && parts.length === 3 && parts[0] === "approve") {
+        const deviceId = parts[1];
+        const days = parts[2] === "7d" ? 7 : 30;
+        const expiry = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+        
+        let dbData = await fetchFirebase() || {};
+        let users = dbData.users || {};
+        if (users[deviceId]) {
+          users[deviceId].status = 'approved';
+          users[deviceId].expires_at = expiry;
+          await saveFirebase("users", users);
+
+          await tgCall("answerCallbackQuery", { callback_query_id: callbackQuery.id, text: "User approved!" });
+          await tgCall("sendMessage", { chat_id: chatId, text: `User ${deviceId} approved for ${days} days.` });
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Webhook processing error:", err);
   }
 
   res.sendStatus(200);
