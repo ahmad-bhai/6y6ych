@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trader Sana</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #0f172a; color: #fff; text-align: center; padding: 50px; }
+        .card { background: #1e293b; padding: 30px; border-radius: 10px; display: inline-block; max-width: 400px; width: 100%; }
+        button { background: #3b82f6; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; margin-top: 15px; }
+        button:hover { background: #2563eb; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>TRADER SANA</h1>
+        <p id="status-text">Checking registration status...</p>
+        <button id="action-btn" style="display:none;" onclick="registerDevice()">Register Device</button>
+    </div>
+
+    <script>
+        function generateId() {
+            let id = localStorage.getItem('device_id');
+            if (!id) {
+                id = Array.from({length: 24}, () => Math.floor(Math.random()*16).toString(16)).join('').toUpperCase();
+                localStorage.setItem('device_id', id);
+            }
+            return id;
+        }
+
+        const deviceId = generateId();
+
+        async function checkStatus() {
+            try {
+                const res = await fetch('/api/status', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ deviceId })
+                });
+                const data = await res.json();
+                if (data.status === 'pending') {
+                    document.getElementById('status-text').innerText = "Status: Pending Admin Approval. Please wait.";
+                } else if (data.status === 'approved') {
+                    document.getElementById('status-text').innerText = "Access Approved! Loading signals...";
+                } else {
+                    document.getElementById('status-text').innerText = "Not registered. Click below to register.";
+                    document.getElementById('action-btn').style.display = 'inline-block';
+                }
+            } catch (e) {
+                document.getElementById('status-text').innerText = "Connection error.";
+            }
+        }
+
+        async function registerDevice() {
+            await fetch('/api/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ deviceId })
+            });
+            checkStatus();
+        }
+
+        checkStatus();
+    </script>
+</body>
+</html>
