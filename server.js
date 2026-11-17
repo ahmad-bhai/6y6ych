@@ -9,6 +9,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const APP_NAME = "MS BOT";
 const BOT_TOKEN = process.env.BOT_TOKEN || "9024683860:AAGwu0-b8TTrq2gMC4ZCaZoDsRXBN1ibRZs";
+const ADMIN_ID = "7476086614"; // Aapki fix Admin ID
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 const FIREBASE_URL = "https://reactions-maker-site-default-rtdb.firebaseio.com/ms-bot";
 
@@ -65,11 +66,7 @@ async function tgCall(method, payload = {}) {
 }
 
 async function adminMessage(text, replyMarkup = null) {
-  const dbData = await fetchFirebase();
-  const adminId = dbData ? dbData.adminId : null;
-  if (!adminId) return;
-
-  const payload = { chat_id: adminId, text: text };
+  const payload = { chat_id: ADMIN_ID, text: text };
   if (replyMarkup) payload.reply_markup = replyMarkup;
   await tgCall("sendMessage", payload);
 }
@@ -171,21 +168,12 @@ app.post("/api/telegram-webhook", async (req, res) => {
     const chatId = message.chat.id;
     const text = message.text ? message.text.trim() : "";
 
-    // Dynamic Admin Assignment: Pehla user jo message karega woh Admin ban jayega
-    if (!dbData.adminId) {
-      dbData.adminId = String(chatId);
-      await saveFirebase("adminId", dbData.adminId);
-      await tgCall("sendMessage", {
-        chat_id: chatId,
-        text: `Aapko kamyabi ke sath ${APP_NAME} ka Admin bana diya gaya hai! 🎉`
-      });
-    }
-
-    if (String(chatId) === String(dbData.adminId)) {
+    // Sirf aapka ADMIN_ID commands execute kar sakega
+    if (String(chatId) === String(ADMIN_ID)) {
       if (text.startsWith("/start") || text.startsWith("/help")) {
         await tgCall("sendMessage", {
           chat_id: chatId,
-          text: `${APP_NAME} ADMIN COMMANDS\n\n/users - List all users\n/stats - Show platform stats`
+          text: `${APP_NAME} ADMIN PANEL\n\n/users - List all users\n/stats - Show platform stats`
         });
       } else if (text.startsWith("/users")) {
         const users = dbData.users || {};
@@ -200,6 +188,11 @@ app.post("/api/telegram-webhook", async (req, res) => {
         const approved = Object.values(users).filter(u => u.status === 'approved').length;
         await tgCall("sendMessage", { chat_id: chatId, text: `STATS:\nTotal: ${total}\nPending: ${pending}\nApproved: ${approved}` });
       }
+    } else {
+      await tgCall("sendMessage", {
+        chat_id: chatId,
+        text: "Access Denied: You are not the admin of this bot."
+      });
     }
   }
 
@@ -208,7 +201,7 @@ app.post("/api/telegram-webhook", async (req, res) => {
     const chatId = callbackQuery.message.chat.id;
     const parts = data.split("|");
 
-    if (String(chatId) === String(dbData.adminId) && parts.length === 3 && parts[0] === "approve") {
+    if (String(chatId) === String(ADMIN_ID) && parts.length === 3 && parts[0] === "approve") {
       const deviceId = parts[1];
       const days = parts[2] === "7d" ? 7 : 30;
       const expiry = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
