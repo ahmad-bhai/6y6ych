@@ -1,7 +1,7 @@
 {
   "name": "ms-bot",
   "version": "1.0.0",
-  "description": "MS BOT platform with dynamic admin and telegram integration",
+  "description": "MS BOT platform",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
